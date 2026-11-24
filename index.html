@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vodafone Sites">
+<meta name="theme-color" content="#E60000">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Vodafone Sites</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,system-ui,"Segoe UI",Tahoma,sans-serif;background:#f4f4f6;color:#1b1b1f;padding:0 12px 40px}
+header{background:#E60000;color:#fff;margin:0 -12px;padding:calc(env(safe-area-inset-top) + 14px) 16px 14px}
+header h1{margin:0;font-size:20px}
+h1{font-size:20px;margin:16px 0 8px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:10px 0;box-shadow:0 1px 3px #0002}
+input[type=text],input[type=tel]{width:100%;font-size:18px;padding:12px;border:1px solid #ccd;border-radius:10px;direction:ltr;text-align:left}
+button,.btn{display:inline-block;font-size:16px;padding:11px 16px;border:0;border-radius:10px;background:#e60000;color:#fff;margin:4px 0;text-decoration:none;font-family:inherit}
+button.sec,.btn.sec{background:#e6e6ec;color:#1b1b1f}
+button.del{background:#fff;color:#c00;border:1px solid #c00}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.muted{color:#666;font-size:14px}
+.coords{direction:ltr;text-align:left;font-family:ui-monospace,monospace}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
+label{display:block;margin:8px 0 4px;font-size:15px}
+.hide{display:none!important}
+#viewer{position:fixed;inset:0;background:#000e;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9}
+.sug{padding:10px;border-bottom:1px solid #eee;direction:ltr;text-align:left}
+</style>
+</head>
+<body>
+<header><h1>Vodafone Sites</h1></header>
+
+<div class="card">
+  <input id="code" type="text" placeholder="Site code" autocapitalize="characters" autocomplete="off">
+  <div id="sugs"></div>
+  <button id="go">Search</button>
+  <div id="msg" class="muted"></div>
+</div>
+
+<div id="site" class="hide">
+  <div class="card">
+    <b id="sname"></b>
+    <div id="scoords" class="coords muted"></div>
+    <div id="nocoord" class="muted hide">This code is not in the imported KMZ/KML. You can still save photos and guard details for it.</div>
+    <div class="row" id="maplinks"></div>
+  </div>
+
+  <div class="card">
+    <b>Photos</b>
+    <div class="row">
+      <label class="btn">📷 Take photo<input id="cam" type="file" accept="image/*" capture="environment" class="hide"></label>
+      <label class="btn sec">Add from Photos<input id="pick" type="file" accept="image/*" multiple class="hide"></label>
+    </div>
+    <div id="photos" class="grid"></div>
+    <div id="pcount" class="muted"></div>
+  </div>
+
+  <div class="card">
+    <b>Guard</b>
+    <label><input type="checkbox" id="hasGuard"> Has guard</label>
+    <div id="gfields">
+      <label>Name</label><input id="gname" type="text" >
+      <label>Phone</label><input id="gphone" type="tel">
+    </div>
+    <button id="gsave">Save</button> <span id="gmsg" class="muted"></span>
+  </div>
+</div>
+
+<div class="card">
+  <b>Sites file (KMZ or KML)</b>
+  <div class="muted" id="kstat"></div>
+  <label class="btn sec">Import KMZ / KML<input id="kml" type="file" accept=".kmz,.kml,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml,*/*" class="hide"></label>
+  <div class="muted">Everything is stored on this phone only. Nothing is uploaded.</div>
+</div>
+
+<div id="viewer" class="hide">
+  <img id="vimg" style="max-width:96%;max-height:80%">
+  <div class="row" style="margin-top:12px"><button id="vclose" class="sec">Close</button><button id="vdel" class="del">Delete photo</button></div>
+</div>
+
+<script>
+"use strict";
+const $=s=>document.getElementById(s);
+const norm=s=>String(s||"").trim().toUpperCase();
+
+// ---- IndexedDB (data stays on this device) ----
+let db;
+function openDB(){return new Promise((res,rej)=>{
+  const r=indexedDB.open("sites",1);
+  r.onupgradeneeded=()=>{const d=r.result;
+    d.createObjectStore("sites",{keyPath:"code"});
+    d.createObjectStore("photos",{keyPath:"id",autoIncrement:true}).createIndex("code","code");
+    d.createObjectStore("guards",{keyPath:"code"});};
+  r.onsuccess=()=>{db=r.result;res()};r.onerror=()=>rej(r.error);});}
+const tx=(st,mode="readonly")=>db.transaction(st,mode).objectStore(st);
+const rq=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const get=(st,k)=>rq(tx(st).get(k));
+const all=st=>rq(tx(st).getAll());
+
+// ---- KML parsing ----
+function parseKML(text){
+  const doc=new DOMParser().parseFromString(text,"text/xml");
+  if(doc.querySelector("parsererror"))throw new Error("Invalid KML file");
+  const out=[];
+  for(const pm of doc.getElementsByTagName("Placemark")){
+    const nm=pm.getElementsByTagName("name")[0];
+    const co=pm.getElementsByTagName("coordinates")[0];
+    if(!nm||!co)continue;
+    const first=co.textContent.trim().split(/\s+/)[0].split(",");
+    const lon=parseFloat(first[0]),lat=parseFloat(first[1]);
+    if(isNaN(lat)||isNaN(lon))continue;
+    out.push({code:norm(nm.textContent),name:nm.textContent.trim(),lat,lon});
+  }
+  return out;
+}
+async function importKML(file){
+  let text;
+  const head=new Uint8Array(await file.slice(0,2).arrayBuffer());
+  if(head[0]===0x50&&head[1]===0x4b){
+    text=await kmzText(file);
+  } else text=await file.text();
+  const list=parseKML(text);
+  if(!list.length)throw new Error("No sites found in the file");
+  await new Promise((res,rej)=>{const t=db.transaction("sites","readwrite");
+    const s=t.objectStore("sites");list.forEach(x=>s.put(x));
+    t.oncomplete=res;t.onerror=()=>rej(t.error);});
+  return list.length;
+}
+async function kmzText(file){
+  const b=new Uint8Array(await file.arrayBuffer());const dv=new DataView(b.buffer);
+  // find end of central directory
+  let e=-1;for(let i=b.length-22;i>=Math.max(0,b.length-66000);i--){if(dv.getUint32(i,true)===0x06054b50){e=i;break;}}
+  if(e<0)throw new Error("Invalid KMZ file");
+  const n=dv.getUint16(e+10,true);let p=dv.getUint32(e+16,true);
+  const ents=[];
+  for(let k=0;k<n;k++){
+    if(dv.getUint32(p,true)!==0x02014b50)break;
+    const method=dv.getUint16(p+10,true),csz=dv.getUint32(p+20,true),nl=dv.getUint16(p+28,true),el=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true),off=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(b.slice(p+46,p+46+nl));
+    ents.push({name,method,csz,off});p+=46+nl+el+cl;
+  }
+  const kmls=ents.filter(x=>/\.kml$/i.test(x.name));
+  if(!kmls.length)throw new Error("No KML inside the KMZ");
+  kmls.sort((x,y)=>(/(^|\/)doc\.kml$/i.test(y.name)?1:0)-(/(^|\/)doc\.kml$/i.test(x.name)?1:0));
+  const t=kmls[0],o=t.off;
+  const ln=dv.getUint16(o+26,true),le=dv.getUint16(o+28,true);
+  const data=b.slice(o+30+ln+le,o+30+ln+le+t.csz);
+  if(t.method===0)return new TextDecoder().decode(data);
+  if(!("DecompressionStream" in window))throw new Error("This browser cannot open KMZ, update iOS");
+  const ds=new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return await new Response(ds).text();
+}
+
+// ---- UI ----
+let cur=null,curUrls=[];
+async function stat(){
+  const n=(await all("sites")).length;
+  $("kstat").textContent=n?`${n} sites stored`:"No KMZ/KML imported yet";
+}
+async function show(code){
+  code=norm(code);if(!code)return;
+  cur=code;
+  const s=await get("sites",code);
+  $("site").classList.remove("hide");
+  $("sname").textContent=s?s.name:code;
+  const ml=$("maplinks");ml.innerHTML="";
+  if(s){
+    $("nocoord").classList.add("hide");
+    $("scoords").textContent=`${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}`;
+    const q=`${s.lat},${s.lon}`;
+    ml.innerHTML=`<a class="btn" href="https://maps.apple.com/?ll=${q}&q=${encodeURIComponent(s.name)}" target="_blank">Apple Maps</a>
+    <a class="btn sec" href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank">Google Maps</a>
+    <a class="btn sec" href="https://www.google.com/maps/dir/?api=1&destination=${q}" target="_blank">Directions</a>`;
+  } else {$("scoords").textContent="";$("nocoord").classList.remove("hide");}
+  await renderPhotos();
+  const g=await get("guards",code)||{};
+  $("hasGuard").checked=!!g.has;$("gname").value=g.name||"";$("gphone").value=g.phone||"";
+  $("gfields").classList.toggle("hide",!$("hasGuard").checked);
+  $("gmsg").textContent="";
+}
+async function renderPhotos(){
+  curUrls.forEach(u=>URL.revokeObjectURL(u));curUrls=[];
+  const ps=await rq(tx("photos").index("code").getAll(cur));
+  const g=$("photos");g.innerHTML="";
+  ps.forEach(p=>{const u=URL.createObjectURL(p.blob);curUrls.push(u);
+    const i=document.createElement("img");i.src=u;i.onclick=()=>view(p.id,u);g.appendChild(i);});
+  $("pcount").textContent=ps.length?`${ps.length} photo(s)`:"No photos yet";
+}
+let viewId=null;
+function view(id,u){viewId=id;$("vimg").src=u;$("viewer").classList.remove("hide");}
+$("vclose").onclick=()=>$("viewer").classList.add("hide");
+$("vdel").onclick=async()=>{
+  if(!$("vdel").dataset.arm){$("vdel").dataset.arm=1;$("vdel").textContent="Tap again to confirm";return;}
+  delete $("vdel").dataset.arm;$("vdel").textContent="Delete photo";
+  await rq(tx("photos","readwrite").delete(viewId));$("viewer").classList.add("hide");renderPhotos();};
+async function addPhotos(files){
+  if(!cur)return;
+  for(const f of files){await rq(tx("photos","readwrite").add({code:cur,blob:f,type:f.type,ts:Date.now()}));}
+  renderPhotos();
+}
+$("cam").onchange=e=>{addPhotos([...e.target.files]);e.target.value="";};
+$("pick").onchange=e=>{addPhotos([...e.target.files]);e.target.value="";};
+$("hasGuard").onchange=()=>$("gfields").classList.toggle("hide",!$("hasGuard").checked);
+$("gsave").onclick=async()=>{
+  if(!cur)return;
+  await rq(tx("guards","readwrite").put({code:cur,has:$("hasGuard").checked,name:$("gname").value.trim(),phone:$("gphone").value.trim()}));
+  $("gmsg").textContent="Saved ✓";};
+$("go").onclick=()=>show($("code").value);
+$("code").onkeydown=e=>{if(e.key==="Enter")show($("code").value);};
+$("code").oninput=async()=>{
+  const v=norm($("code").value);const box=$("sugs");box.innerHTML="";
+  if(v.length<2)return;
+  const l=(await all("sites")).filter(s=>s.code.includes(v)).slice(0,6);
+  l.forEach(s=>{const d=document.createElement("div");d.className="sug";d.textContent=s.name;
+    d.onclick=()=>{$("code").value=s.name;box.innerHTML="";show(s.code);};box.appendChild(d);});
+};
+$("kml").onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{const n=await importKML(f);$("msg").textContent=`Imported ${n} sites`;await stat();}
+  catch(err){$("msg").textContent=err.message;}
+  e.target.value="";};
+
+(async()=>{
+  await openDB();await stat();
+  if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+})();
+</script>
+</body>
+</html>
