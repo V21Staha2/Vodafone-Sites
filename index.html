@@ -26,6 +26,8 @@ button.del{background:#fff;color:#c00;border:1px solid #c00}
 .muted{color:#666;font-size:14px}
 .coords{direction:ltr;text-align:left;font-family:ui-monospace,monospace}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.th{position:relative}
+.xb{position:absolute;top:4px;right:4px;width:30px;height:30px;padding:0;margin:0;border-radius:50%;background:#000a;color:#fff;font-size:20px;line-height:30px}
 .grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
 label{display:block;margin:8px 0 4px;font-size:15px}
 .hide{display:none!important}
@@ -59,6 +61,7 @@ label{display:block;margin:8px 0 4px;font-size:15px}
     </div>
     <div id="photos" class="grid"></div>
     <div id="pcount" class="muted"></div>
+    <button id="delall" class="del hide">Delete all photos for this site</button>
   </div>
 
   <div class="card">
@@ -189,16 +192,31 @@ async function renderPhotos(){
   const ps=await rq(tx("photos").index("code").getAll(cur));
   const g=$("photos");g.innerHTML="";
   ps.forEach(p=>{const u=URL.createObjectURL(p.blob);curUrls.push(u);
-    const i=document.createElement("img");i.src=u;i.onclick=()=>view(p.id,u);g.appendChild(i);});
+    const w=document.createElement("div");w.className="th";
+    const i=document.createElement("img");i.src=u;i.onclick=()=>view(p.id,u);
+    const x=document.createElement("button");x.className="xb";x.textContent="\u00d7";x.setAttribute("aria-label","Delete photo");
+    x.onclick=()=>delPhoto(p.id);
+    w.appendChild(i);w.appendChild(x);g.appendChild(w);});
+  $("delall").classList.toggle("hide",!ps.length);
   $("pcount").textContent=ps.length?`${ps.length} photo(s)`:"No photos yet";
 }
 let viewId=null;
 function view(id,u){viewId=id;$("vimg").src=u;$("viewer").classList.remove("hide");}
 $("vclose").onclick=()=>$("viewer").classList.add("hide");
-$("vdel").onclick=async()=>{
-  if(!$("vdel").dataset.arm){$("vdel").dataset.arm=1;$("vdel").textContent="Tap again to confirm";return;}
-  delete $("vdel").dataset.arm;$("vdel").textContent="Delete photo";
-  await rq(tx("photos","readwrite").delete(viewId));$("viewer").classList.add("hide");renderPhotos();};
+async function delPhoto(id){
+  if(!confirm("Delete this photo? This cannot be undone."))return;
+  await rq(tx("photos","readwrite").delete(id));
+  $("viewer").classList.add("hide");await renderPhotos();
+}
+$("vdel").onclick=()=>delPhoto(viewId);
+$("delall").onclick=async()=>{
+  const ps=await rq(tx("photos").index("code").getAllKeys(cur));
+  if(!ps.length)return;
+  if(!confirm("Delete all "+ps.length+" photo(s) for "+cur+"? This cannot be undone."))return;
+  const t=db.transaction("photos","readwrite").objectStore("photos");
+  await Promise.all(ps.map(k=>rq(t.delete(k))));
+  await renderPhotos();
+};
 async function addPhotos(files){
   if(!cur)return;
   for(const f of files){await rq(tx("photos","readwrite").add({code:cur,blob:f,type:f.type,ts:Date.now()}));}
