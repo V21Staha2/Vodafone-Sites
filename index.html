@@ -18,6 +18,7 @@ header{background:#E60000;color:#fff;margin:0 -12px;padding:calc(env(safe-area-i
 header h1{margin:0;font-size:20px}
 h1{font-size:20px;margin:16px 0 8px}
 .card{background:#fff;border-radius:14px;padding:14px;margin:10px 0;box-shadow:0 1px 3px #0002}
+select{width:100%;font-size:18px;padding:12px;border:1px solid #ccd;border-radius:10px;background:#fff}
 input[type=text],input[type=tel]{width:100%;font-size:18px;padding:12px;border:1px solid #ccd;border-radius:10px;direction:ltr;text-align:left}
 button,.btn{display:inline-block;font-size:16px;padding:11px 16px;border:0;border-radius:10px;background:#e60000;color:#fff;margin:4px 0;text-decoration:none;font-family:inherit}
 button.sec,.btn.sec{background:#e6e6ec;color:#1b1b1f}
@@ -27,6 +28,7 @@ button.del{background:#fff;color:#c00;border:1px solid #c00}
 .coords{direction:ltr;text-align:left;font-family:ui-monospace,monospace}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
 .th{position:relative}
+.cap{font-size:11px;color:#666;text-align:center;direction:ltr;margin-top:2px}
 .xb{position:absolute;top:4px;right:4px;width:30px;height:30px;padding:0;margin:0;border-radius:50%;background:#000a;color:#fff;font-size:20px;line-height:30px}
 .grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
 label{display:block;margin:8px 0 4px;font-size:15px}
@@ -45,9 +47,13 @@ label{display:block;margin:8px 0 4px;font-size:15px}
   <div id="msg" class="muted"></div>
 </div>
 
+<div id="bbanner" class="card hide" style="background:#fff3cd;border:1px solid #e0c36a">⚠ <span id="btext"></span> <button id="bgo" class="sec">Back up now</button></div>
+
+<div id="favcard" class="card hide"><b>★ Bookmarks</b><div id="favs" class="row"></div></div>
+
 <div id="site" class="hide">
   <div class="card">
-    <b id="sname"></b>
+    <div class="row" style="align-items:center;justify-content:space-between;flex-wrap:nowrap"><b id="sname"></b><button id="star" class="sec" style="font-size:22px;padding:4px 12px" aria-label="Bookmark">☆</button></div>
     <div id="scoords" class="coords muted"></div>
     <div id="nocoord" class="muted hide">This code is not in the imported KMZ/KML. You can still save photos and guard details for it.</div>
     <div class="row" id="maplinks"></div>
@@ -66,10 +72,14 @@ label{display:block;margin:8px 0 4px;font-size:15px}
 
   <div class="card">
     <b>Guard</b>
-    <label><input type="checkbox" id="hasGuard"> Has guard</label>
+    <label>Site type</label>
+    <input id="stype" type="text" list="types" placeholder="e.g. Rooftop, Greenfield, Indoor">
+    <datalist id="types"><option>Rooftop</option><option>Greenfield</option><option>Tower</option><option>Indoor</option><option>Shelter</option><option>Pole</option></datalist>
+    <label>Has guard?</label>
+    <select id="gstate"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select>
     <div id="gfields">
-      <label>Name</label><input id="gname" type="text" >
-      <label>Phone</label><input id="gphone" type="tel">
+      <label>Guard name</label><input id="gname" type="text">
+      <label>Guard phone</label><input id="gphone" type="tel">
     </div>
     <button id="gsave">Save</button> <span id="gmsg" class="muted"></span>
   </div>
@@ -80,6 +90,18 @@ label{display:block;margin:8px 0 4px;font-size:15px}
   <div class="muted" id="kstat"></div>
   <label class="btn sec">Import KMZ / KML<input id="kml" type="file" accept=".kmz,.kml,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml,*/*" class="hide"></label>
   <div class="muted">Everything is stored on this phone only. Nothing is uploaded.</div>
+</div>
+
+<div class="card">
+  <b>Backup</b>
+  <div class="muted" id="bstat"></div>
+  <div class="muted" id="pstat"></div>
+  <div class="muted" id="qstat"></div>
+  <button id="bprep">Save backup</button>
+  <button id="bshare" class="hide">Save to Files / Share</button>
+  <label class="btn sec">Restore backup<input id="brest" type="file" accept=".json,application/json,*/*" class="hide"></label>
+  <div id="bmsg" class="muted"></div>
+  <div class="muted">The backup is one file with all sites, photos, guard details and bookmarks. Keep it in Files. Restoring merges it into this phone.</div>
 </div>
 
 <div id="viewer" class="hide">
@@ -183,8 +205,10 @@ async function show(code){
   } else {$("scoords").textContent="";$("nocoord").classList.remove("hide");}
   await renderPhotos();
   const g=await get("guards",code)||{};
-  $("hasGuard").checked=!!g.has;$("gname").value=g.name||"";$("gphone").value=g.phone||"";
-  $("gfields").classList.toggle("hide",!$("hasGuard").checked);
+  $("stype").value=g.type||"";$("gstate").value=g.has===true?"yes":g.has===false?"no":"";
+  $("gname").value=g.name||"";$("gphone").value=g.phone||"";
+  $("gfields").classList.toggle("hide",$("gstate").value!=="yes");
+  setStar(!!g.fav);
   $("gmsg").textContent="";
 }
 async function renderPhotos(){
@@ -196,7 +220,8 @@ async function renderPhotos(){
     const i=document.createElement("img");i.src=u;i.onclick=()=>view(p.id,u);
     const x=document.createElement("button");x.className="xb";x.textContent="\u00d7";x.setAttribute("aria-label","Delete photo");
     x.onclick=()=>delPhoto(p.id);
-    w.appendChild(i);w.appendChild(x);g.appendChild(w);});
+    const cp=document.createElement("div");cp.className="cap";cp.textContent=p.ts?fmtTs(p.ts):"";
+    w.appendChild(i);w.appendChild(x);w.appendChild(cp);g.appendChild(w);});
   $("delall").classList.toggle("hide",!ps.length);
   $("pcount").textContent=ps.length?`${ps.length} photo(s)`:"No photos yet";
 }
@@ -206,7 +231,7 @@ $("vclose").onclick=()=>$("viewer").classList.add("hide");
 async function delPhoto(id){
   if(!confirm("Delete this photo? This cannot be undone."))return;
   await rq(tx("photos","readwrite").delete(id));
-  $("viewer").classList.add("hide");await renderPhotos();
+  $("viewer").classList.add("hide");await renderPhotos();refreshStorage();
 }
 $("vdel").onclick=()=>delPhoto(viewId);
 $("delall").onclick=async()=>{
@@ -217,18 +242,55 @@ $("delall").onclick=async()=>{
   await Promise.all(ps.map(k=>rq(t.delete(k))));
   await renderPhotos();
 };
+function fmtTs(t){const d=new Date(t),p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());}
+async function shrink(f,ts){
+  try{
+    const bmp=await createImageBitmap(f,{imageOrientation:"from-image"});
+    const m=Math.max(bmp.width,bmp.height),k=m>1600?1600/m:1;
+    const w=Math.round(bmp.width*k),h=Math.round(bmp.height*k);
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    const g=c.getContext("2d");g.drawImage(bmp,0,0,w,h);
+    if(bmp.close)bmp.close();
+    const fs=Math.max(18,Math.round(Math.max(w,h)/38)),txt=fmtTs(ts);
+    g.font="bold "+fs+"px -apple-system,Helvetica,Arial,sans-serif";g.textBaseline="bottom";
+    const tw=g.measureText(txt).width,pad=Math.round(fs*0.4);
+    g.fillStyle="rgba(0,0,0,0.6)";g.fillRect(w-tw-pad*2,h-fs-pad*2,tw+pad*2,fs+pad*2);
+    g.fillStyle="#fff";g.fillText(txt,w-tw-pad,h-pad);
+    const out=await new Promise(r=>c.toBlob(r,"image/jpeg",0.7));
+    return out&&out.size<f.size?out:(k<1&&out?out:f);
+  }catch(e){return f;}
+}
 async function addPhotos(files){
   if(!cur)return;
-  for(const f of files){await rq(tx("photos","readwrite").add({code:cur,blob:f,type:f.type,ts:Date.now()}));}
-  renderPhotos();
+  $("pcount").textContent="Saving\u2026";
+  for(const f of files){const ts=Date.now();const b=await shrink(f,ts);
+    await rq(tx("photos","readwrite").add({code:cur,blob:b,type:b.type,ts}));}
+  await renderPhotos();refreshStorage();
 }
 $("cam").onchange=e=>{addPhotos([...e.target.files]);e.target.value="";};
 $("pick").onchange=e=>{addPhotos([...e.target.files]);e.target.value="";};
-$("hasGuard").onchange=()=>$("gfields").classList.toggle("hide",!$("hasGuard").checked);
+$("gstate").onchange=()=>$("gfields").classList.toggle("hide",$("gstate").value!=="yes");
+function setStar(f){$("star").textContent=f?"★":"☆";$("star").dataset.on=f?"1":"";$("star").style.color=f?"#e60000":"";}
+async function saveMeta(patch){
+  const old=await get("guards",cur)||{code:cur};
+  const n=Object.assign({},old,patch,{code:cur});
+  await rq(tx("guards","readwrite").put(n));return n;
+}
+$("star").onclick=async()=>{if(!cur)return;const on=!$("star").dataset.on;await saveMeta({fav:on});setStar(on);renderFavs();};
+async function renderFavs(){
+  const all_=(await all("guards")).filter(x=>x.fav);
+  $("favcard").classList.toggle("hide",!all_.length);
+  const b=$("favs");b.innerHTML="";
+  all_.sort((a,c)=>a.code.localeCompare(c.code,undefined,{numeric:true})).forEach(x=>{
+    const e=document.createElement("button");e.className="sec";e.textContent=x.code;e.onclick=()=>{$("code").value=x.code;show(x.code);window.scrollTo(0,0);};b.appendChild(e);});
+}
 $("gsave").onclick=async()=>{
   if(!cur)return;
-  await rq(tx("guards","readwrite").put({code:cur,has:$("hasGuard").checked,name:$("gname").value.trim(),phone:$("gphone").value.trim()}));
-  $("gmsg").textContent="Saved ✓";};
+  const v=$("gstate").value;
+  await saveMeta({type:$("stype").value.trim(),has:v==="yes"?true:v==="no"?false:null,
+    name:v==="yes"?$("gname").value.trim():"",phone:v==="yes"?$("gphone").value.trim():""});
+  $("gmsg").textContent="Saved \u2713";};
 $("go").onclick=()=>show($("code").value);
 $("code").onkeydown=e=>{if(e.key==="Enter")show($("code").value);};
 $("code").oninput=async()=>{
@@ -244,9 +306,71 @@ $("kml").onchange=async e=>{
   catch(err){$("msg").textContent=err.message;}
   e.target.value="";};
 
+const b64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(b);});
+let backupFile=null;
+function lastB(){try{return localStorage.getItem("lastBackup");}catch(e){return null;}}
+function showB(){const t=lastB();$("bstat").textContent=t?"Last backup: "+new Date(+t).toLocaleString():"No backup saved yet.";}
+$("bprep").onclick=async()=>{
+  $("bmsg").textContent="Preparing\u2026";$("bshare").classList.add("hide");
+  try{
+    const sites=await all("sites"),guards=await all("guards"),photos=await all("photos");
+    const parts=['{"app":"vodafone-sites","version":2,"created":'+Date.now()+',"sites":'+JSON.stringify(sites)+',"guards":'+JSON.stringify(guards)+',"photos":['];
+    for(let i=0;i<photos.length;i++){const p=photos[i];
+      parts.push((i?",":"")+JSON.stringify({code:p.code,ts:p.ts,type:p.type||p.blob.type,data:await b64(p.blob)}));}
+    parts.push("]}");
+    const d=new Date().toISOString().slice(0,10);
+    backupFile=new File(parts,"vodafone-sites-backup-"+d+".json",{type:"application/json"});
+    $("bmsg").textContent="Ready: "+sites.length+" sites, "+photos.length+" photos, "+guards.length+" site records ("+(backupFile.size/1048576).toFixed(1)+" MB). Tap Save to Files / Share.";
+    $("bshare").classList.remove("hide");
+  }catch(e){$("bmsg").textContent="Backup failed: "+e.message;}
+};
+$("bshare").onclick=async()=>{
+  if(!backupFile)return;
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[backupFile]})){await navigator.share({files:[backupFile],title:"Vodafone Sites backup"});}
+    else{const u=URL.createObjectURL(backupFile);const a=document.createElement("a");a.href=u;a.download=backupFile.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),60000);}
+    try{localStorage.setItem("lastBackup",String(Date.now()));}catch(e){}
+    showB();checkBanner();$("bmsg").textContent="Backup handed to iOS. Choose Save to Files and check it is there.";
+  }catch(e){if(e.name!=="AbortError")$("bmsg").textContent="Could not save: "+e.message;}
+};
+$("brest").onchange=async e=>{
+  const f=e.target.files[0];e.target.value="";if(!f)return;
+  try{
+    const j=JSON.parse(await f.text());
+    if(j.app!=="vodafone-sites")throw new Error("Not a Vodafone Sites backup file");
+    if(!confirm("Restore "+(j.sites||[]).length+" sites, "+(j.photos||[]).length+" photos and "+(j.guards||[]).length+" site records into this phone? Existing items with the same code are overwritten."))return;
+    for(const x of j.sites||[])await rq(tx("sites","readwrite").put(x));
+    for(const x of j.guards||[])await rq(tx("guards","readwrite").put(x));
+    for(const p of j.photos||[]){const blob=await (await fetch(p.data)).blob();
+      await rq(tx("photos","readwrite").add({code:p.code,blob,type:p.type,ts:p.ts}));}
+    $("bmsg").textContent="Restored.";await stat();await renderFavs();if(cur)show(cur);
+  }catch(err){$("bmsg").textContent="Restore failed: "+err.message;}
+};
+
+async function refreshStorage(){
+  try{
+    if(navigator.storage&&navigator.storage.estimate){
+      const e=await navigator.storage.estimate();
+      const mb=x=>(x/1048576).toFixed(x>1e9?0:1);
+      $("qstat").textContent="Storage used: "+mb(e.usage||0)+" MB of about "+mb(e.quota||0)+" MB available to this app.";
+    }
+  }catch(e){}
+  checkBanner();
+}
+async function checkBanner(){
+  const t=+lastB()||0;
+  const has=(await all("photos")).length>0||(await all("guards")).length>0;
+  const old=!t||Date.now()-t>7*864e5;
+  $("bbanner").classList.toggle("hide",!(has&&old));
+  $("btext").textContent=t?"Your last backup is more than 7 days old.":"You have data but no backup yet.";
+}
+$("bgo").onclick=()=>{$("bprep").scrollIntoView({behavior:"smooth"});$("bprep").click();};
 (async()=>{
-  await openDB();await stat();
-  if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+  await openDB();await stat();await renderFavs();showB();refreshStorage();
+  if(navigator.storage&&navigator.storage.persist){
+    const ok=await navigator.storage.persist();
+    $("pstat").textContent=ok?"Storage protected: Safari should not clear this data automatically.":"Storage not guaranteed: iOS may clear it. Add the app to the Home Screen and keep a backup.";
+  } else $("pstat").textContent="Storage protection unavailable on this browser. Keep a backup.";
 })();
 </script>
 </body>
