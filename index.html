@@ -71,9 +71,14 @@ label{display:block;margin:8px 0 4px;font-size:15px}
   </div>
 
   <div class="card">
-    <b>Guard</b>
+    <b>Site details</b>
     <label>Site type</label>
     <select id="stype"><option value="">Not set</option><option>Greenfield</option><option>Rooftop</option></select>
+    <button id="tsave">Save</button> <span id="tmsg" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <b>Guard</b>
     <label>Has guard?</label>
     <select id="gstate"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select>
     <div id="gfields">
@@ -222,7 +227,7 @@ async function show(code){
   $("g2name").value=g2.name||"";$("g2p1").value=g2.phone1||"";$("g2p2").value=g2.phone2||"";
   $("gfields").classList.toggle("hide",$("gstate").value!=="yes");
   setStar(!!g.fav);
-  $("gmsg").textContent="";
+  $("gmsg").textContent="";$("tmsg").textContent="";
 }
 async function renderPhotos(){
   curUrls.forEach(u=>URL.revokeObjectURL(u));curUrls=[];
@@ -302,10 +307,14 @@ $("gsave").onclick=async()=>{
   if(!cur)return;
   const v=$("gstate").value,on=v==="yes";
   const gp=(n,a,b)=>({name:on?$(n).value.trim():"",phone1:on?$(a).value.trim():"",phone2:on?$(b).value.trim():""});
-  await saveMeta({type:$("stype").value,has:on?true:v==="no"?false:null,
+  await saveMeta({has:on?true:v==="no"?false:null,
     name:"",phone:"",phone2:"",
     g1:gp("g1name","g1p1","g1p2"),g2:gp("g2name","g2p1","g2p2")});
   $("gmsg").textContent="Saved \u2713";};
+$("tsave").onclick=async()=>{
+  if(!cur)return;
+  await saveMeta({type:$("stype").value});
+  $("tmsg").textContent="Saved \u2713";};
 $("go").onclick=()=>show($("code").value);
 $("code").onkeydown=e=>{if(e.key==="Enter")show($("code").value);};
 $("code").oninput=async()=>{
