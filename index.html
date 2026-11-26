@@ -73,13 +73,18 @@ label{display:block;margin:8px 0 4px;font-size:15px}
   <div class="card">
     <b>Guard</b>
     <label>Site type</label>
-    <input id="stype" type="text" list="types" placeholder="e.g. Rooftop, Greenfield, Indoor">
-    <datalist id="types"><option>Rooftop</option><option>Greenfield</option><option>Tower</option><option>Indoor</option><option>Shelter</option><option>Pole</option></datalist>
+    <select id="stype"><option value="">Not set</option><option>Greenfield</option><option>Rooftop</option></select>
     <label>Has guard?</label>
     <select id="gstate"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select>
     <div id="gfields">
-      <label>Guard name</label><input id="gname" type="text">
-      <label>Guard phone</label><input id="gphone" type="tel">
+      <div class="muted" style="margin-top:10px"><b>Guard 1</b></div>
+      <label>Name</label><input id="g1name" type="text">
+      <label>Phone 1</label><input id="g1p1" type="tel">
+      <label>Phone 2</label><input id="g1p2" type="tel">
+      <div class="muted" style="margin-top:10px"><b>Guard 2 (optional)</b></div>
+      <label>Name</label><input id="g2name" type="text">
+      <label>Phone 1</label><input id="g2p1" type="tel">
+      <label>Phone 2</label><input id="g2p2" type="tel">
     </div>
     <button id="gsave">Save</button> <span id="gmsg" class="muted"></span>
   </div>
@@ -205,8 +210,16 @@ async function show(code){
   } else {$("scoords").textContent="";$("nocoord").classList.remove("hide");}
   await renderPhotos();
   const g=await get("guards",code)||{};
-  $("stype").value=g.type||"";$("gstate").value=g.has===true?"yes":g.has===false?"no":"";
-  $("gname").value=g.name||"";$("gphone").value=g.phone||"";
+  const tsel=$("stype");
+  tsel.querySelectorAll("option[data-legacy]").forEach(o=>o.remove());
+  const tv=g.type||"";
+  if(tv&&!["Greenfield","Rooftop"].includes(tv)){const o=document.createElement("option");o.value=tv;o.textContent=tv+" (old)";o.dataset.legacy="1";tsel.appendChild(o);}
+  tsel.value=tv;
+  $("gstate").value=g.has===true?"yes":g.has===false?"no":"";
+  const g1=g.g1||{name:g.name||"",phone1:g.phone||"",phone2:g.phone2||""};
+  const g2=g.g2||{};
+  $("g1name").value=g1.name||"";$("g1p1").value=g1.phone1||"";$("g1p2").value=g1.phone2||"";
+  $("g2name").value=g2.name||"";$("g2p1").value=g2.phone1||"";$("g2p2").value=g2.phone2||"";
   $("gfields").classList.toggle("hide",$("gstate").value!=="yes");
   setStar(!!g.fav);
   $("gmsg").textContent="";
@@ -287,9 +300,11 @@ async function renderFavs(){
 }
 $("gsave").onclick=async()=>{
   if(!cur)return;
-  const v=$("gstate").value;
-  await saveMeta({type:$("stype").value.trim(),has:v==="yes"?true:v==="no"?false:null,
-    name:v==="yes"?$("gname").value.trim():"",phone:v==="yes"?$("gphone").value.trim():""});
+  const v=$("gstate").value,on=v==="yes";
+  const gp=(n,a,b)=>({name:on?$(n).value.trim():"",phone1:on?$(a).value.trim():"",phone2:on?$(b).value.trim():""});
+  await saveMeta({type:$("stype").value,has:on?true:v==="no"?false:null,
+    name:"",phone:"",phone2:"",
+    g1:gp("g1name","g1p1","g1p2"),g2:gp("g2name","g2p1","g2p2")});
   $("gmsg").textContent="Saved \u2713";};
 $("go").onclick=()=>show($("code").value);
 $("code").onkeydown=e=>{if(e.key==="Enter")show($("code").value);};
@@ -314,7 +329,7 @@ $("bprep").onclick=async()=>{
   $("bmsg").textContent="Preparing\u2026";$("bshare").classList.add("hide");
   try{
     const sites=await all("sites"),guards=await all("guards"),photos=await all("photos");
-    const parts=['{"app":"vodafone-sites","version":2,"created":'+Date.now()+',"sites":'+JSON.stringify(sites)+',"guards":'+JSON.stringify(guards)+',"photos":['];
+    const parts=['{"app":"vodafone-sites","version":3,"created":'+Date.now()+',"sites":'+JSON.stringify(sites)+',"guards":'+JSON.stringify(guards)+',"photos":['];
     for(let i=0;i<photos.length;i++){const p=photos[i];
       parts.push((i?",":"")+JSON.stringify({code:p.code,ts:p.ts,type:p.type||p.blob.type,data:await b64(p.blob)}));}
     parts.push("]}");
